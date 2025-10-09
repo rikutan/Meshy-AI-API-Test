@@ -1,0 +1,12 @@
+Flask==3.0.3
+python-dotenv==1.0.1
+requests==2.32.3
+google-generativeai==0.7.2
+protobuf<5,>=3.20.3
+
+# 新規で追加をした依存関係
+gunicorn==22.0.0
+werkzeug==3.0.3
+
+firebase-admin==6.6.0
+google-cloud-storage==2.18.2

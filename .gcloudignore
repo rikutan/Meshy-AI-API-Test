@@ -1,0 +1,13 @@
+# ===== Default ignores =====
+.gcloudignore
+.git
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+
+# ===== Important includes =====
+!app.py
+!requirements.txt
+!serviceAccount.json
+!Procfile

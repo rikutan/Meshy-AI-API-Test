@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ja">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>性格診断 → 3Dちびキャラ生成</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/quiz.css') }}">
+</head>
+
+<body>
+  <header class="site-header">
+    <a href="{{ url_for('root') }}"
+      style="color:#9aa3b2;text-decoration:none;border:1px solid rgba(255,255,255,.18);padding:6px 10px;border-radius:10px;display:inline-block;margin-bottom:8px;">TOPに戻る</a>
+    <h1>性格診断 → 3Dちびキャラ生成</h1>
+  </header>
+
+
+  <section class="card" id="quizCard">
+    <div class="q-header">
+      <div id="qNumber">Q.-</div>
+    </div>
+    <div class="q-title" id="qTitle">読み込み中…</div>
+    <div class="options" id="qOptions"></div>
+    <div class="q-footer"><span id="progressCount">0 / 0</span></div>
+  </section>
+
+  <script src="{{ url_for('static', filename='js/quiz.js') }}"></script>
+</body>
+
+</html>

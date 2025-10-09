@@ -1,0 +1,84 @@
+:root {
+    --bg: #0f1115;
+    --fg: #e7ecf1;
+    --muted: #98a2b3;
+    --card: #151821;
+    --border: #222736;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+.z-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+.z-header a {
+    color: var(--muted);
+    text-decoration: none;
+}
+
+.z-container {
+    padding: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.z-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+}
+
+.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 12px;
+    transition: transform 0.2s ease;
+}
+
+.card:hover {
+    transform: scale(1.02);
+}
+
+.card h3 {
+    margin: 8px 0 4px;
+    font-size: 16px;
+}
+
+.card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+model-viewer {
+    width: 100%;
+    height: 240px;
+    background: #0b0d12;
+    border-radius: 10px;
+}
+
+.z-more {
+    display: block;
+    margin: 24px auto 0;
+    padding: 10px 16px;
+    border-radius: 10px;
+    background: #2a2f44;
+    border: 1px solid var(--border);
+    color: var(--fg);
+    cursor: pointer;
+}
