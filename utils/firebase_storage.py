@@ -6,9 +6,6 @@ from firebase_init import init_firebase
 
 db, bucket = init_firebase()
 
-# test
-
-
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
