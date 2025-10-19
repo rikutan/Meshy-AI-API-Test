@@ -1,145 +1,108 @@
 import os
 import requests
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 
-# ---- 基本設定
-MESHY_BASE = "https://api.meshy.ai"
+API_BASE = "https://api.meshy.ai"
+MESHY_API_KEY = os.getenv("MESHY_API_KEY", "").strip()
+HEADERS_JSON = {
+    "Authorization": f"Bearer {MESHY_API_KEY}",
+    "Content-Type": "application/json",
+}
 
-
-class MeshyError(RuntimeError):
-    """Meshy API関連のエラーを表すカスタム例外"""
+class MeshyError(Exception):
     pass
 
-
-# ---- ヘッダー生成
-def _headers() -> Dict[str, str]:
-    return {
-        "Authorization": f"Bearer {os.getenv('MESHY_API_KEY', '')}",
-        "Content-Type": "application/json",
-    }
-
-
-# ---- APIキー確認
-def _check_key():
-    if not os.getenv("MESHY_API_KEY", "").strip():
-        raise MeshyError("Missing MESHY_API_KEY. Put it in .env")
-
-
-# ---- エラーハンドリング
-def _raise_for_error(r: requests.Response, prefix: str):
-    if not r.ok:
+def _raise_for_api_error(resp: requests.Response):
+    if resp.status_code >= 400:
         try:
-            detail = r.json()
+            j = resp.json()
         except Exception:
-            detail = r.text
-        raise MeshyError(f"{prefix}: {r.status_code} {detail}")
+            j = {"message": resp.text}
+        raise MeshyError(f"{resp.status_code} {j}")
 
-
-# ---- Preview 生成
+# ---------- Text-to-3D (v2)
 def create_text_to_3d_preview(payload: Dict[str, Any]) -> str:
-    _check_key()
+    """Returns preview task_id"""
     body = {
         "mode": "preview",
-        "prompt": payload["prompt"],
+        # Meshy 6 Preview + リギング前提の生成に寄せた既定値
+        "ai_model": "latest",           # Meshy 6 Preview
+        "is_a_t_pose": True,            # A/Tポーズで生成
+        "topology": "quad",
+        "symmetry_mode": "on",
+        "should_remesh": True,
     }
+    body.update(payload or {})
+    resp = requests.post(f"{API_BASE}/openapi/v2/text-to-3d", json=body, headers=HEADERS_JSON, timeout=60)
+    _raise_for_api_error(resp)
+    return resp.json().get("result")
 
-    # 任意パラメータを動的に追加
-    for k in [
-        "art_style",
-        "seed",
-        "ai_model",
-        "topology",
-        "target_polycount",
-        "should_remesh",
-        "symmetry_mode",
-        "is_a_t_pose",
-        "moderation",
-    ]:
-        if k in payload and payload[k] is not None:
-            body[k] = payload[k]
-
-    # ✅ URL修正：/openapi/v2 → /v2
-    r = requests.post(
-        f"{MESHY_BASE}/v2/text-to-3d",
-        headers=_headers(),
-        json=body,
-        timeout=60,
-    )
-    _raise_for_error(r, "Preview create failed")
-
-    # Meshyのレスポンス形式が変わる可能性もあるため安全に取得
-    result = r.json()
-    if "result" not in result:
-        raise MeshyError(f"Unexpected response: {result}")
-    return result["result"]  # task_id
-
-
-# ---- Refine
 def create_text_to_3d_refine(payload: Dict[str, Any]) -> str:
-    """
-    必須: preview_task_id
-    任意: enable_pbr(bool), texture_prompt(str), texture_image_url(str), ai_model(str), moderation(bool)
-    """
-    _check_key()
-    if not payload.get("preview_task_id"):
-        raise MeshyError("Refine failed: preview_task_id is empty.")
-
+    """payload must include preview_task_id; returns refine task_id"""
     body = {
         "mode": "refine",
-        "preview_task_id": payload["preview_task_id"],
+        "enable_pbr": True,
     }
+    body.update(payload or {})
+    resp = requests.post(f"{API_BASE}/openapi/v2/text-to-3d", json=body, headers=HEADERS_JSON, timeout=60)
+    _raise_for_api_error(resp)
+    return resp.json().get("result")
 
-    for k in [
-        "enable_pbr",
-        "texture_prompt",
-        "texture_image_url",
-        "ai_model",
-        "moderation",
-    ]:
-        if k in payload and payload[k] not in (None, ""):
-            body[k] = payload[k]
-
-    r = requests.post(
-        f"{MESHY_BASE}/v2/text-to-3d",
-        headers=_headers(),
-        json=body,
-        timeout=60,
-    )
-    _raise_for_error(r, "Refine create failed")
-
-    result = r.json()
-    if "result" not in result:
-        raise MeshyError(f"Unexpected response: {result}")
-    return result["result"]
-
-
-# ---- タスク取得
 def get_text_to_3d_task(task_id: str) -> Dict[str, Any]:
-    _check_key()
-    if not task_id:
-        raise MeshyError("Get task failed: task_id is empty.")
+    resp = requests.get(f"{API_BASE}/openapi/v2/text-to-3d/{task_id}", headers={"Authorization": f"Bearer {MESHY_API_KEY}"}, timeout=60)
+    _raise_for_api_error(resp)
+    return resp.json()
 
-    r = requests.get(
-        f"{MESHY_BASE}/v2/text-to-3d/{task_id}",
-        headers=_headers(),
-        timeout=60,
-    )
-    _raise_for_error(r, "Get task failed")
+# ---------- Rigging (v1)
+def create_rigging_task(*, input_task_id: Optional[str] = None, model_url: Optional[str] = None,
+                        height_meters: float = 1.7, texture_image_url: Optional[str] = None) -> str:
+    if not input_task_id and not model_url:
+        raise MeshyError("Either input_task_id or model_url is required for rigging.")
+    body: Dict[str, Any] = {
+        "height_meters": float(height_meters),
+    }
+    if input_task_id:
+        body["input_task_id"] = input_task_id
+    if model_url:
+        body["model_url"] = model_url
+    if texture_image_url:
+        body["texture_image_url"] = texture_image_url
 
-    try:
-        return r.json()
-    except Exception as e:
-        raise MeshyError(f"Invalid JSON response: {e}")
+    resp = requests.post(f"{API_BASE}/openapi/v1/rigging", json=body, headers=HEADERS_JSON, timeout=60)
+    _raise_for_api_error(resp)
+    return resp.json().get("result")
 
+def get_rigging_task(task_id: str) -> Dict[str, Any]:
+    resp = requests.get(f"{API_BASE}/openapi/v1/rigging/{task_id}", headers={"Authorization": f"Bearer {MESHY_API_KEY}"}, timeout=60)
+    _raise_for_api_error(resp)
+    return resp.json()
 
-# ---- ファイルダウンロード
+# ---------- Animation (v1)
+def create_animation_task(*, rig_task_id: str, action_id: int, post_process: Optional[Dict[str, Any]] = None) -> str:
+    if not rig_task_id:
+        raise MeshyError("rig_task_id is required.")
+    body: Dict[str, Any] = {
+        "rig_task_id": rig_task_id,
+        "action_id": int(action_id),
+    }
+    if post_process:
+        body["post_process"] = post_process
+
+    resp = requests.post(f"{API_BASE}/openapi/v1/animations", json=body, headers=HEADERS_JSON, timeout=60)
+    _raise_for_api_error(resp)
+    return resp.json().get("result")
+
+def get_animation_task(task_id: str) -> Dict[str, Any]:
+    resp = requests.get(f"{API_BASE}/openapi/v1/animations/{task_id}", headers={"Authorization": f"Bearer {MESHY_API_KEY}"}, timeout=60)
+    _raise_for_api_error(resp)
+    return resp.json()
+
+# ---------- Util
 def download_file(url: str, dest_path: str) -> str:
-    if not url:
-        raise MeshyError("Download failed: url is empty.")
-    with requests.get(url, stream=True, timeout=120) as resp:
-        resp.raise_for_status()
-        with open(dest_path, "wb") as f:
-            for chunk in resp.iter_content(8192):
-                if chunk:
-                    f.write(chunk)
+    r = requests.get(url, stream=True, timeout=120)
+    _raise_for_api_error(r)
+    with open(dest_path, "wb") as f:
+        for chunk in r.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                f.write(chunk)
     return dest_path

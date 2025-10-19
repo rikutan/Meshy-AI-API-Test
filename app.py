@@ -16,7 +16,7 @@ DEMO_MODE = os.getenv("DEMO_MODE", "0").lower() in ("1", "true", "on")
 SAMPLE_GLB = "https://modelviewer.dev/shared-assets/models/Astronaut.glb"
 SAMPLE_THUMB = "https://modelviewer.dev/shared-assets/thumbnails/Astronaut.webp"
 
-# --- 任意: CORS（フロントとAPIが別オリジンのときだけ必要）
+# --- 任意: CORS
 try:
     from flask_cors import CORS
 
@@ -46,6 +46,10 @@ from utils.meshy_client import (
     create_text_to_3d_preview,
     create_text_to_3d_refine,
     get_text_to_3d_task,
+    create_rigging_task,
+    get_rigging_task,
+    create_animation_task,
+    get_animation_task,
     download_file,
     MeshyError,
 )
@@ -63,7 +67,7 @@ DOWNLOAD_DIR = os.path.join(os.path.dirname(__file__), "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
-# ---- ログ & キャッシュ制御
+# ---- ログ & キャッシュ
 @app.before_request
 def _log_req():
     print(f">>> {request.method} {request.path}")
@@ -120,21 +124,11 @@ def api_catalog_list():
 
 @app.route("/api/catalog/register", methods=["POST"])
 def api_catalog_register():
-    """
-    body:
-    {
-      "mesh_url": str,                 // 必須
-      "title": "任意の文字列" | { ... } // 文字列 or メタ情報（後方互換）
-      "user": "anonymous",             // 任意
-      "profile": {...}                 // 任意
-    }
-    """
     try:
         data = request.get_json(force=True) or {}
         mesh_url = (data.get("mesh_url") or "").strip()
         if not mesh_url:
             return jsonify({"ok": False, "error": "mesh_url が指定されていません"}), 400
-
         title_or_meta = data.get("title") or "生成モデル"
         extra = {
             "user": data.get("user") or "anonymous",
@@ -208,19 +202,20 @@ def scores_to_profile(scores: dict[str, int]) -> dict:
 
 
 def profile_to_prompt(profile: dict) -> tuple[str, str]:
+    """リギングしやすい“人型二足歩行”の指示に最適化"""
     tags = [
-        "super-deformed chibi character",
-        "2.5-heads chibi",
-        "big head, small body",
+        "humanoid bipedal character, humanlike proportions",
+        "clear limbs and joints, rig-friendly topology",
+        "standing A or T-pose, facing front",
         ", ".join(profile["vibe"]),
         f'{profile["color"]} color scheme',
         profile["theme"],
         profile["details"],
-        "anime, cel-shaded, clean topology",
-        "single character, standing T-pose, facing front",
+        "anime or stylized, cel-shaded, clean topology",
+        "single character, full-body",
     ]
     prompt = ", ".join(tags)
-    negative = "low quality, low resolution, low poly, deformed hands, extra limbs, photorealistic, realistic"
+    negative = "super-deformed, chibi, 2.5-heads, big head small body, low quality, low resolution, low poly, deformed hands, extra limbs, photorealistic"
     return prompt, negative
 
 
@@ -242,7 +237,7 @@ def scores_to_summary_lines(profile: dict) -> list[str]:
     ]
 
 
-# ---- 内部: Meshy待ち（成功までポーリング）
+# ---- 内部: Meshy待ち
 def _wait_task_succeeded(task_id: str, max_wait_sec: int = 120, interval_sec: int = 2):
     waited = 0
     last = None
@@ -252,7 +247,7 @@ def _wait_task_succeeded(task_id: str, max_wait_sec: int = 120, interval_sec: in
             return last
         time.sleep(interval_sec)
         waited += interval_sec
-    return last  # タイムアウト時は最後のレスを返す
+    return last
 
 
 # ---- 診断送信
@@ -261,7 +256,7 @@ def api_quiz_submit():
     data = request.get_json(force=True) or {}
     answers = data.get("answers")
 
-    # --- 通常経路（10問の回答あり）
+    # --- 通常経路
     if isinstance(answers, list) and answers:
         scores = {t["id"]: 0 for t in TRAITS}
         for a in answers:
@@ -278,7 +273,6 @@ def api_quiz_submit():
         should_remesh = bool(data.get("should_remesh", True))
         is_a_t_pose = bool(data.get("is_a_t_pose", True))
 
-        # --- DEMO: サンプルGLB+サムネを登録して即返す（図鑑にサムネが出る）
         if DEMO_MODE:
             saved = register_model_from_url(
                 SAMPLE_GLB,
@@ -303,8 +297,8 @@ def api_quiz_submit():
                 }
             )
 
-        # --- 本番: 非同期タスク作成 →（任意で）成功まで待って登録
         try:
+            # Text-to-3D Preview (v2)
             task_id = create_text_to_3d_preview(
                 {
                     "prompt": prompt,
@@ -312,11 +306,11 @@ def api_quiz_submit():
                     "art_style": art_style,
                     "should_remesh": should_remesh,
                     "is_a_t_pose": is_a_t_pose,
+                    # Meshy 6 Preview は create_text_to_3d_preview 側で既定 ai_model=latest
                 }
             )
 
-            # すぐ返したいなら下の登録部分をコメントアウトしてもOK
-            # ここでは「成功したら図鑑に自動登録」まで面倒見る
+            # ここで成功待ち → 自動登録（任意）
             result = _wait_task_succeeded(task_id, max_wait_sec=120, interval_sec=2)
             if result and result.get("status") == "SUCCEEDED":
                 mesh_url = (result.get("model_urls") or {}).get("glb")
@@ -345,7 +339,7 @@ def api_quiz_submit():
         except MeshyError as e:
             return jsonify({"error": str(e)}), 400
 
-    # --- MBTI互換（answers が無いとき）
+    # --- MBTI互換
     mbti = (data.get("mbti") or "ENFP").upper()
     prompt, negative = profile_to_prompt(
         scores_to_profile(
@@ -364,15 +358,10 @@ def api_quiz_submit():
     is_a_t_pose = bool(data.get("is_a_t_pose", True))
 
     if DEMO_MODE:
-        # MBTIルートでもデモ登録しておく
         saved = register_model_from_url(
             SAMPLE_GLB,
             title_or_meta="デモモデル",
-            extra={
-                "user": "anonymous",
-                "profile": {},
-                "thumbnail_url": SAMPLE_THUMB,
-            },
+            extra={"user": "anonymous", "profile": {}, "thumbnail_url": SAMPLE_THUMB},
         )
         return jsonify(
             {
@@ -436,10 +425,59 @@ def api_refine(preview_task_id: str):
             {
                 "preview_task_id": preview_task_id,
                 "enable_pbr": enable_pbr,
-                "texture_prompt": texture_prompt,
+                **({"texture_prompt": texture_prompt} if texture_prompt else {}),
             }
         )
         return jsonify({"refine_task_id": refine_id})
+    except MeshyError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+# ---- Rigging
+@app.post("/api/rigging")
+def api_rigging_create():
+    data = request.get_json(force=True) or {}
+    input_task_id = (data.get("input_task_id") or "").strip() or None
+    model_url = (data.get("model_url") or "").strip() or None
+    try:
+        rig_id = create_rigging_task(
+            input_task_id=input_task_id,
+            model_url=model_url,
+            height_meters=float(data.get("height_meters", 1.7)),
+        )
+        return jsonify({"rig_task_id": rig_id})
+    except MeshyError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.get("/api/rigging/<task_id>")
+def api_rigging_get(task_id: str):
+    try:
+        return jsonify(get_rigging_task(task_id))
+    except MeshyError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+# ---- Animation
+@app.post("/api/animations")
+def api_animations_create():
+    data = request.get_json(force=True) or {}
+    rig_task_id = (data.get("rig_task_id") or "").strip()
+    action_id = int(data.get("action_id", 0))
+    post_process = data.get("post_process") or None
+    try:
+        ani_id = create_animation_task(
+            rig_task_id=rig_task_id, action_id=action_id, post_process=post_process
+        )
+        return jsonify({"animation_task_id": ani_id})
+    except MeshyError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.get("/api/animations/<task_id>")
+def api_animations_get(task_id: str):
+    try:
+        return jsonify(get_animation_task(task_id))
     except MeshyError as e:
         return jsonify({"error": str(e)}), 400
 

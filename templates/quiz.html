@@ -6,15 +6,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>性格診断 → 3Dちびキャラ生成</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quiz.css') }}">
+  <!-- ローディング用のスタイルを使い回す -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/result.css') }}">
 </head>
 
 <body>
+  <!-- 送信中オーバーレイ（最初は非表示） -->
+  <div id="loadingOverlay" class="overlay hidden">
+    <div class="loader">
+      <div class="spinner"></div>
+      <div id="loadLabel" class="load-label">送信中…</div>
+      <div class="progress-wrap">
+        <div id="progressBar" class="progress-bar"></div>
+      </div>
+      <div class="progress-text" id="progressText">0%</div>
+    </div>
+  </div>
+
   <header class="site-header">
     <a href="{{ url_for('root') }}"
       style="color:#9aa3b2;text-decoration:none;border:1px solid rgba(255,255,255,.18);padding:6px 10px;border-radius:10px;display:inline-block;margin-bottom:8px;">TOPに戻る</a>
     <h1>性格診断 → 3Dちびキャラ生成</h1>
   </header>
-
 
   <section class="card" id="quizCard">
     <div class="q-header">
